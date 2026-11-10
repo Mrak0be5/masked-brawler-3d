@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Masked Brawler — 3D Модель и Анимация Удара</title>
+  <style>
+    :root {
+      --bg-top: #1a1d26;
+      --bg-bot: #0f1117;
+      --panel: rgba(20, 23, 31, 0.84);
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #ff8a2b;
+      --accent-hot: #ff5722;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at 50% 38%, #262b38 0%, var(--bg-bot) 78%);
+      color: var(--text);
+      user-select: none;
+    }
+    #canvas-wrap { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    .topbar {
+      position: fixed; top: 16px; left: 16px; right: 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      pointer-events: none; z-index: 10;
+    }
+    .brand, .top-actions {
+      pointer-events: auto;
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px 16px;
+      display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    .badge {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+    }
+    .brand h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.01em; }
+    .brand span { font-size: 12px; color: var(--muted); }
+
+    .dock {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      width: min(860px, calc(100vw - 24px));
+      background: var(--panel);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 12px;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.48);
+      z-index: 10;
+    }
+    .row {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+    button, a.btn {
+      appearance: none; border: 1px solid var(--border);
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      font-size: 13px; font-weight: 600;
+      padding: 8px 13px; border-radius: 10px;
+      cursor: pointer; text-decoration: none;
+      transition: background 0.15s, border-color 0.15s, transform 0.08s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    button:hover, a.btn:hover {
+      background: rgba(255,255,255,0.11);
+      border-color: rgba(255,255,255,0.22);
+    }
+    button:active { transform: scale(0.97); }
+    button.active {
+      background: rgba(255, 138, 43, 0.20);
+      border-color: var(--accent);
+      color: #ffd3ad;
+    }
+    button.punch-cta {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hot) 100%);
+      border-color: rgba(255,255,255,0.25);
+      color: #fff; font-weight: 700;
+      padding: 9px 18px;
+      box-shadow: 0 6px 20px rgba(255, 94, 36, 0.38);
+    }
+    button.punch-cta:hover { filter: brightness(1.08); }
+
+    .scrubber-row {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .scrubber-row input[type="range"] {
+      flex: 1; accent-color: var(--accent); cursor: pointer; height: 5px;
+    }
+    .frame-readout {
+      font-variant-numeric: tabular-nums;
+      font-size: 12px; color: var(--muted); min-width: 108px; text-align: right;
+    }
+
+    #loader {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      background: var(--bg-bot); z-index: 30; transition: opacity 0.3s;
+    }
+    .spinner {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.12);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 640px) {
+      .brand span { display: none; }
+      .dock { padding: 12px; gap: 10px; bottom: 10px; }
+      button, a.btn { padding: 7px 10px; font-size: 12px; }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="loader">
+    <div class="spinner"></div>
+    <div id="loader-text" style="font-size:14px;color:#d1d5db;">Загрузка 3D-модели и рига...</div>
+  </div>
+
+  <div id="canvas-wrap"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="badge"></div>
+      <div>
+        <h1>Masked Brawler 3D</h1>
+        <span>Blender 5.2 GLB · 21 кость · Three.js Cel-Rig</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="btn-cam-front" title="Ракурс спереди 3/4">Спереди 3/4</button>
+      <button id="btn-cam-back" title="Ракурс сзади 3/4 (шрамы)">Сзади 3/4</button>
+      <a class="btn" href="./masked_brawler.glb" download="masked_brawler.glb">⬇ GLB (352 КБ)</a>
+    </div>
+  </header>
+
+  <section class="dock" aria-label="Управление анимацией">
+    <div class="row">
+      <div class="group">
+        <button id="btn-punch-trigger" class="punch-cta">🥊 Удар рукой (Space)</button>
+        <button id="btn-clip-punch" class="active" data-clip="AN_Brute_Attack_Heavy_01">Удар</button>
+        <button id="btn-clip-combo" data-clip="AN_Brute_Attack_Combo_02">Комбо 1-2</button>
+        <button id="btn-clip-idle" data-clip="AN_Brute_Idle">Стойка</button>
+      </div>
+      <div class="group">
+        <button id="btn-loop" class="active" title="Повтор анимации">Повтор</button>
+        <button id="btn-speed" title="Скорость воспроизведения">1.0×</button>
+        <button id="btn-toon" class="active" title="Стилизованный контур и cel-шейдинг">Toon + Контур</button>
+        <button id="btn-vfx" class="active" title="Вспышка и волна в момент удара">Эффект удара</button>
+        <button id="btn-skel" title="Показать скелет">Скелет</button>
+      </div>
+    </div>
+    <div class="scrubber-row">
+      <button id="btn-play" style="min-width:40px;justify-content:center;" title="Пауза / Пуск">⏸</button>
+      <input id="scrubber" type="range" min="0" max="1000" value="0" aria-label="Таймлайн кадра" />
+      <div id="frame-readout" class="frame-readout">Кадр 00 / 42</div>
+    </div>
+  </section>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+    const wrap = document.getElementById("canvas-wrap");
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.06;
+    wrap.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 60);
+    const CAM_PRESETS = {
+      front: { pos: new THREE.Vector3(0.95, 1.62, 3.75), target: new THREE.Vector3(0, 0.76, 0.12) },
+      back:  { pos: new THREE.Vector3(-0.95, 1.66, -3.65), target: new THREE.Vector3(0, 0.76, 0.0) }
+    };
+    camera.position.copy(CAM_PRESETS.front.pos);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(CAM_PRESETS.front.target);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.07;
+    controls.minDistance = 1.6;
+    controls.maxDistance = 9.0;
+    controls.maxPolarAngle = Math.PI * 0.52;
+    controls.update();
+
+    // Warm golden key sun + cool slate shadow hemisphere matching concept art
+    const hemi = new THREE.HemisphereLight(0xffeacc, 0x4d5b82, 1.15);
+    scene.add(hemi);
+
+    const keyLight = new THREE.DirectionalLight(0xffe6bd, 2.35);
+    keyLight.position.set(-2.8, 4.4, 3.4);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.camera.near = 0.5;
+    keyLight.shadow.camera.far = 14;
+    const sc = 2.4;
+    keyLight.shadow.camera.left = -sc;
+    keyLight.shadow.camera.right = sc;
+    keyLight.shadow.camera.top = sc;
+    keyLight.shadow.camera.bottom = -sc;
+    keyLight.shadow.bias = -0.0006;
+    scene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0x88a4ff, 0.95);
+    rimLight.position.set(2.8, 2.4, -3.2);
+    scene.add(rimLight);
+
+    // Subtle arena pedestal & soft contact disc
+    const floorGeo = new THREE.CircleGeometry(2.6, 64);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x181b24, roughness: 0.92, metalness: 0.05
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    const ringGeo = new THREE.RingGeometry(1.12, 1.16, 64);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff8a2b, transparent: true, opacity: 0.22, side: THREE.DoubleSide });
+    const arenaRing = new THREE.Mesh(ringGeo, ringMat);
+    arenaRing.rotation.x = -Math.PI / 2;
+    arenaRing.position.y = 0.003;
+    scene.add(arenaRing);
+
+    // 4-step cel ramp texture for stylized Toon shading
+    function makeToonGradient() {
+      const data = new Uint8Array([92, 148, 218, 255]);
+      const tex = new THREE.DataTexture(data, 4, 1, THREE.RedFormat);
+      tex.minFilter = THREE.NearestFilter;
+      tex.magFilter = THREE.NearestFilter;
+      tex.needsUpdate = true;
+      return tex;
+    }
+    const toonRamp = makeToonGradient();
+
+    // Compute averaged smooth outward directions across split/flat-shaded seams so inverted-hull outline never cracks!
+    function attachSmoothOutlineDir(geometry) {
+      const pos = geometry.attributes.position;
+      const nrm = geometry.attributes.normal;
+      const sums = new Map();
+      for (let i = 0; i < pos.count; i++) {
+        const k = `${Math.round(pos.getX(i) * 2000)},${Math.round(pos.getY(i) * 2000)},${Math.round(pos.getZ(i) * 2000)}`;
+        let s = sums.get(k);
+        if (!s) { s = [0, 0, 0]; sums.set(k, s); }
+        s[0] += nrm.getX(i); s[1] += nrm.getY(i); s[2] += nrm.getZ(i);
+      }
+      const arr = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const k = `${Math.round(pos.getX(i) * 2000)},${Math.round(pos.getY(i) * 2000)},${Math.round(pos.getZ(i) * 2000)}`;
+        const [x, y, z] = sums.get(k);
+        const len = Math.hypot(x, y, z) || 1;
+        arr[i * 3] = x / len; arr[i * 3 + 1] = y / len; arr[i * 3 + 2] = z / len;
+      }
+      geometry.setAttribute("outlineDir", new THREE.BufferAttribute(arr, 3));
+    }
+
+    function makeSkinnedOutlineMaterial() {
+      const mat = new THREE.MeshToonMaterial({
+        color: 0x000000,
+        emissive: 0x1d1315,
+        side: THREE.BackSide
+      });
+      mat.onBeforeCompile = (shader) => {
+        shader.vertexShader = "attribute vec3 outlineDir;\n" + shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "vec3 transformed = vec3( position + outlineDir * 0.013 );"
+        );
+      };
+      return mat;
+    }
+
+    // Impact shockwave VFX pool (triggered right at fist impact!)
+    const shockGroup = new THREE.Group();
+    scene.add(shockGroup);
+    const shockRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.10, 0.24, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffb84d, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false })
+    );
+    const shockCore = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.16, 1),
+      new THREE.MeshBasicMaterial({ color: 0xff6a28, transparent: true, opacity: 0, wireframe: true, depthWrite: false })
+    );
+    shockGroup.add(shockRing, shockCore);
+
+    let shockTimer = 0;
+    let camShake = 0;
+    function spawnImpactBurst(worldPos) {
+      if (!vfxEnabled) return;
+      shockGroup.position.copy(worldPos);
+      shockGroup.lookAt(camera.position);
+      shockTimer = 1.0;
+      camShake = 0.032;
+    }
+
+    // State
+    let mixer = null;
+    const actions = {};
+    let activeClipName = "AN_Brute_Attack_Heavy_01";
+    let activeAction = null;
+    let isPlaying = true;
+    let loopEnabled = true;
+    let toonEnabled = true;
+    let vfxEnabled = true;
+    const speeds = [1.0, 0.5, 0.25, 1.25];
+    let speedIdx = 0;
+
+    let mainMesh = null;
+    let pbrMaterial = null;
+    let toonMaterial = null;
+    let outlineMesh = null;
+    let skelHelper = null;
+    let rightHandBone = null;
+    let leftHandBone = null;
+    let prevAnimTime = 0;
+
+    const scrubber = document.getElementById("scrubber");
+    const frameReadout = document.getElementById("frame-readout");
+    const btnPlay = document.getElementById("btn-play");
+    let isScrubbing = false;
+
+    // Note: Blender -Y forward exports to glTF +Z forward!
+    const loader = new GLTFLoader();
+    loader.load(
+      "./masked_brawler.glb",
+      (gltf) => {
+        const root = gltf.scene;
+        scene.add(root);
+
+        root.traverse((node) => {
+          if (node.isBone) {
+            if (node.name === "Hand.R") rightHandBone = node;
+            if (node.name === "Hand.L") leftHandBone = node;
+          }
+          if (node.isSkinnedMesh) {
+            mainMesh = node;
+            node.castShadow = true;
+            node.receiveShadow = true;
+            node.frustumCulled = false;
+
+            pbrMaterial = node.material;
+            toonMaterial = new THREE.MeshToonMaterial({
+              map: pbrMaterial.map,
+              gradientMap: toonRamp
+            });
+            node.material = toonMaterial;
+
+            // Create real-time skinned comic ink outline sharing exact same skeleton!
+            attachSmoothOutlineDir(node.geometry);
+            outlineMesh = new THREE.SkinnedMesh(node.geometry, makeSkinnedOutlineMaterial());
+            outlineMesh.frustumCulled = false;
+            node.parent.add(outlineMesh);
+            outlineMesh.bind(node.skeleton, node.bindMatrix);
+          }
+        });
+
+        skelHelper = new THREE.SkeletonHelper(root);
+        skelHelper.visible = false;
+        scene.add(skelHelper);
+
+        mixer = new THREE.AnimationMixer(root);
+        for (const clip of gltf.animations) {
+          const act = mixer.clipAction(clip);
+          actions[clip.name] = act;
+        }
+
+        mixer.addEventListener("finished", () => {
+          if (!loopEnabled && activeClipName !== "AN_Brute_Idle" && actions["AN_Brute_Idle"]) {
+            switchClip("AN_Brute_Idle", true);
+          }
+        });
+
+        switchClip("AN_Brute_Attack_Heavy_01", loopEnabled);
+        document.getElementById("loader").style.opacity = "0";
+        setTimeout(() => document.getElementById("loader").remove(), 320);
+      },
+      undefined,
+      (err) => {
+        document.getElementById("loader-text").textContent = "Ошибка загрузки GLB: " + err.message;
+      }
+    );
+
+    function switchClip(name, loop = loopEnabled, restart = true) {
+      if (!actions[name]) return;
+      const next = actions[name];
+      if (activeAction && activeAction !== next) {
+        activeAction.fadeOut(0.14);
+      }
+      activeClipName = name;
+      activeAction = next;
+      activeAction.reset();
+      activeAction.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+      activeAction.clampWhenFinished = !loop;
+      activeAction.fadeIn(0.12);
+      activeAction.play();
+      prevAnimTime = 0;
+
+      if (!isPlaying) {
+        isPlaying = true;
+        btnPlay.textContent = "⏸";
+      }
+
+      document.querySelectorAll("[data-clip]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.clip === name);
+      });
+    }
+
+    function triggerSinglePunch() {
+      const targetClip = activeClipName === "AN_Brute_Attack_Combo_02"
+        ? "AN_Brute_Attack_Combo_02"
+        : "AN_Brute_Attack_Heavy_01";
+      switchClip(targetClip, loopEnabled, true);
+    }
+
+    document.getElementById("btn-punch-trigger").addEventListener("click", triggerSinglePunch);
+    document.querySelectorAll("[data-clip]").forEach((btn) => {
+      btn.addEventListener("click", () => switchClip(btn.dataset.clip, loopEnabled));
+    });
+
+    document.getElementById("btn-loop").addEventListener("click", (e) => {
+      loopEnabled = !loopEnabled;
+      e.currentTarget.classList.toggle("active", loopEnabled);
+      if (activeAction) {
+        activeAction.setLoop(loopEnabled ? THREE.LoopRepeat : THREE.LoopOnce, loopEnabled ? Infinity : 1);
+        activeAction.clampWhenFinished = !loopEnabled;
+      }
+    });
+
+    document.getElementById("btn-speed").addEventListener("click", (e) => {
+      speedIdx = (speedIdx + 1) % speeds.length;
+      e.currentTarget.textContent = speeds[speedIdx].toFixed(2).replace(/\.00$/, ".0") + "×";
+    });
+
+    document.getElementById("btn-toon").addEventListener("click", (e) => {
+      toonEnabled = !toonEnabled;
+      e.currentTarget.classList.toggle("active", toonEnabled);
+      if (mainMesh) mainMesh.material = toonEnabled ? toonMaterial : pbrMaterial;
+      if (outlineMesh) outlineMesh.visible = toonEnabled;
+    });
+
+    document.getElementById("btn-vfx").addEventListener("click", (e) => {
+      vfxEnabled = !vfxEnabled;
+      e.currentTarget.classList.toggle("active", vfxEnabled);
+    });
+
+    document.getElementById("btn-skel").addEventListener("click", (e) => {
+      if (!skelHelper) return;
+      skelHelper.visible = !skelHelper.visible;
+      e.currentTarget.classList.toggle("active", skelHelper.visible);
+    });
+
+    btnPlay.addEventListener("click", () => {
+      isPlaying = !isPlaying;
+      btnPlay.textContent = isPlaying ? "⏸" : "▶";
+    });
+
+    scrubber.addEventListener("input", () => {
+      if (!activeAction || !mixer) return;
+      isScrubbing = true;
+      isPlaying = false;
+      btnPlay.textContent = "▶";
+      const dur = activeAction.getClip().duration;
+      activeAction.paused = false;
+      activeAction.time = (Number(scrubber.value) / 1000) * dur;
+      mixer.update(0);
+    });
+    scrubber.addEventListener("change", () => { isScrubbing = false; });
+
+    // Smooth camera preset transitions
+    let camLerp = null;
+    function flyCamera(preset) {
+      camLerp = {
+        fromPos: camera.position.clone(),
+        toPos: preset.pos.clone(),
+        fromTgt: controls.target.clone(),
+        toTgt: preset.target.clone(),
+        t: 0
+      };
+    }
+    document.getElementById("btn-cam-front").addEventListener("click", () => flyCamera(CAM_PRESETS.front));
+    document.getElementById("btn-cam-back").addEventListener("click", () => flyCamera(CAM_PRESETS.back));
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        triggerSinglePunch();
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Check threshold crossing inside looping clip
+    function crossedTime(prev, curr, hitSec) {
+      return prev < hitSec && curr >= hitSec;
+    }
+
+    const tmpVec = new THREE.Vector3();
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+
+      if (mixer && activeAction) {
+        const clipDur = activeAction.getClip().duration;
+        if (isPlaying && !isScrubbing) {
+          mixer.update(dt * speeds[speedIdx]);
+          const tNow = activeAction.time % Math.max(clipDur, 0.001);
+
+          // Trigger punch shockwave right on impact frame!
+          if (activeClipName === "AN_Brute_Attack_Heavy_01" && crossedTime(prevAnimTime, tNow, 17 / 30)) {
+            if (rightHandBone) {
+              rightHandBone.getWorldPosition(tmpVec);
+              tmpVec.z += 0.16;
+              spawnImpactBurst(tmpVec);
+            }
+          } else if (activeClipName === "AN_Brute_Attack_Combo_02") {
+            if (crossedTime(prevAnimTime, tNow, 11 / 30) && leftHandBone) {
+              leftHandBone.getWorldPosition(tmpVec);
+              tmpVec.z += 0.16;
+              spawnImpactBurst(tmpVec);
+            }
+            if (crossedTime(prevAnimTime, tNow, 24 / 30) && rightHandBone) {
+              rightHandBone.getWorldPosition(tmpVec);
+              tmpVec.z += 0.16;
+              spawnImpactBurst(tmpVec);
+            }
+          }
+          prevAnimTime = tNow;
+        }
+
+        const curT = activeAction.time % Math.max(clipDur, 0.001);
+        if (!isScrubbing) {
+          scrubber.value = String(Math.round((curT / clipDur) * 1000));
+        }
+        const totalFrames = Math.round(clipDur * 30);
+        const curFrame = Math.min(totalFrames, Math.round(curT * 30));
+        frameReadout.textContent = `Кадр ${String(curFrame).padStart(2, "0")} / ${String(totalFrames).padStart(2, "0")}`;
+      }
+
+      if (shockTimer > 0) {
+        shockTimer = Math.max(0, shockTimer - dt * 3.8);
+        const p = 1 - shockTimer;
+        const sc = 0.6 + p * 3.4;
+        shockRing.scale.setScalar(sc);
+        shockRing.material.opacity = shockTimer * 0.85;
+        shockCore.scale.setScalar(0.5 + p * 2.2);
+        shockCore.rotation.z += dt * 9;
+        shockCore.material.opacity = shockTimer * 0.65;
+      }
+
+      if (camLerp) {
+        camLerp.t = Math.min(1, camLerp.t + dt * 3.2);
+        const ease = 1 - Math.pow(1 - camLerp.t, 3);
+        camera.position.lerpVectors(camLerp.fromPos, camLerp.toPos, ease);
+        controls.target.lerpVectors(camLerp.fromTgt, camLerp.toTgt, ease);
+        if (camLerp.t >= 1) camLerp = null;
+      }
+
+      controls.update();
+
+      if (camShake > 0.001) {
+        camera.position.x += (Math.random() - 0.5) * camShake;
+        camera.position.y += (Math.random() - 0.5) * camShake;
+        camShake *= Math.pow(0.01, dt);
+      } else {
+        camShake = 0;
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
